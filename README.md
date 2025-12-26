@@ -1,51 +1,96 @@
 # Roommate Chores Tracker
 
-Мини-приложение для распределения домашних дел между соседями. Доменная модель:
+Трекер домашних дел между участниками квартиры. Доменная модель:
 
-- `User` — участник квартиры.
-- `Chore` — задача с периодичностью.
-- `Assignment` — назначение задачи на пользователя с дедлайном и статусом.
+- `User`
+- `Chore (title, cadence)`
+- `Assignment (user_id, due_at, status)`
 
-Все запросы (кроме `/health`) требуют API-ключа через заголовок `X-API-Key`.
+API покрывает CRUD для `/chores` и `/assignments`, а также `GET /stats`. Аутентификация построена на API-ключе (`X-API-Key`), владелец может управлять ресурсами, остальные операции проходят в соответствии с проверками доступа.
+
+## Требования
+
+- Python 3.11+
+- SQLite (по умолчанию) или подключение к Postgres через переменные окружения
 
 ## Подготовка окружения
+
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\Activate.ps1
-pip install -r requirements.txt -r requirements-dev.txt
+source .venv/bin/activate  # Windows: .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt -r requirements-dev.txt || true
+pip install ruff black isort pytest pre-commit
 pre-commit install
 ```
 
-## Запуск
+## Запуск приложения
+
+1. Выставите API-ключ, который понадобится каждому запросу:
+
+   ```bash
+   export APP_API_KEY=super-secret-key
+   ```
+
+2. Поднимите FastAPI-приложение:
+
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+
+3. Проверьте, что приложение откликается:
+
+   ```bash
+   curl -H "X-API-Key: $APP_API_KEY" http://127.0.0.1:8000/health
+   ```
+
+Контейнерный запуск доступен через `docker compose up --build` (используется `Dockerfile` и `compose.yaml`).
+
+## Тесты
+
 ```bash
-export APP_API_KEY=super-secret-key
-uvicorn app.main:app --reload
-# проверка
-curl -H \"X-API-Key: $APP_API_KEY\" http://127.0.0.1:8000/health
+pytest -q
 ```
 
 ## Эндпойнты
-- `GET /health` — статус сервиса.
-- `POST /users`, `GET /users` — создание и список участников.
-- `POST /chores`, `GET /chores`, `GET /chores/{id}`, `PUT /chores/{id}`, `DELETE /chores/{id}` — CRUD задач с валидацией `cadence`.
-- `POST /assignments`, `GET /assignments?status=...`, `PATCH /assignments/{id}` — назначение задач и обновление статусов.
-- `GET /stats` — агрегированная статистика по пользователям/задачам/назначениям.
+
+- `GET /health` — проверка статуса сервиса.
+- `POST /users`, `GET /users` — управление участниками квартиры.
+- `POST /chores`, `GET /chores`, `GET /chores/{id}`, `PUT /chores/{id}`, `DELETE /chores/{id}` — CRUD по задачам с валидацией `cadence`.
+- `POST /assignments`, `GET /assignments?status=pending|completed|skipped`, `PATCH /assignments/{id}` — назначение задач соседям и обновление статусов.
+- `GET /stats` — агрегированная статистика по пользователям, задачам и назначениям.
 
 Пример создания назначения:
+
 ```bash
-curl -X POST http://127.0.0.1:8000/assignments \\
-  -H \"Content-Type: application/json\" \\
-  -H \"X-API-Key: $APP_API_KEY\" \\
-  -d '{\"user_id\": 1, \"chore_id\": 2, \"due_at\": \"2025-01-10T09:00:00Z\", \"status\": \"pending\"}'
+curl -X POST http://127.0.0.1:8000/assignments \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $APP_API_KEY" \
+  -d '{
+        "user_id": 1,
+        "chore_id": 3,
+        "due_at": "2025-01-10T09:00:00Z",
+        "status": "pending"
+      }'
 ```
 
-## Локальные проверки
+## Локальные проверки перед PR
+
 ```bash
-ruff --fix .
+ruff check --fix .
 black .
 isort .
 pytest -q
 pre-commit run --all-files
 ```
 
-См. также: `SECURITY.md`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`.
+## CI
+
+- `.github/workflows/ci.yml` запускает линтеры, форматтеры, тесты и `pre-commit run --all-files --show-diff-on-failure` на GitHub Actions.
+- После загрузки репозитория в GitHub добавьте required-check **CI / build** в защите ветки `main` (Settings → Branches).
+
+## Дополнительно
+
+- Безопасность: см. `SECURITY.md`.
+- Хуки: см. `.pre-commit-config.yaml`.
+- Формат ошибок соответствует [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7807)-подобному JSON и описан в `app/main.py`.
