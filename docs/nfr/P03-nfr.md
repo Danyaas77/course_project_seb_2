@@ -15,6 +15,16 @@
 - Requirement: The service **must not** leak internal exception details to clients.
 - Rationale: Avoid giving attackers implementation hints (maps to P04/F2).
 
+<a id="nfr-err-1"></a>
+### NFR-ERR-1 — RFC7807 envelopes with correlation
+- Requirement: Ошибки **должны** возвращаться в формате RFC 7807 с полями `type/title/status/detail/instance/correlation_id/timestamp`; детали внутренних ошибок маскируются.
+- Rationale: Единый контракт ускоряет расследование инцидентов и предотвращает утечки стека.
+
+<a id="nfr-up-1"></a>
+### NFR-UP-1 — Безопасные загрузки вложений
+- Requirement: Загрузки файлов **обязаны** проверять magic bytes (png/jpeg), иметь лимит 5 МБ, канонизированный путь без симлинков, имя файла генерируется по UUID с расширением по типу.
+- Rationale: Предотвращает DoS, обход ограничений и запись файлов вне целевой директории.
+
 <a id="nfr-sc-3"></a>
 ### NFR-SC-3 — Secrets isolation
 - Requirement: API ключи и другие секреты развёртывания **должны** храниться вне репозитория (ENV/secret store) и загружаться в рантайме; при компрометации ключ должен поддерживать замену без полной перезаливки.
