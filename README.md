@@ -1,5 +1,7 @@
 # Roommate Chores Tracker
 
+![CI](https://github.com/hse-secdev-2025-fall/course-project-Danyaas77/actions/workflows/ci.yml/badge.svg)
+
 Трекер домашних дел между участниками квартиры. Доменная модель:
 
 - `User`
@@ -96,8 +98,10 @@ pre-commit run --all-files
 
 ## CI
 
-- `.github/workflows/ci.yml` запускает линтеры, форматтеры, тесты и `pre-commit run --all-files --show-diff-on-failure` на GitHub Actions.
-- После загрузки репозитория в GitHub добавьте required-check **CI / build** в защите ветки `main` (Settings → Branches).
+- `.github/workflows/ci.yml` запускает линтеры, `pre-commit`, покрытие, сборку wheel и dry-run стейдж-деплой. Кэшируются `pip` и `poetry`, все секреты подставляются из GitHub Secrets/Vars и сразу маскируются через `::add-mask::`.
+- Результаты (`reports/junit.xml`, `reports/coverage.xml`, собранные wheel-файлы и build/deploy-логи) сохраняются в артефактах джоба.
+- Для корректного выполнения заведите Secrets `APP_API_KEY`, `NOTIFY_TOKEN`, `STAGING_DEPLOY_TOKEN` и репозиторные Variables `NOTIFY_WEBHOOK_URL`, `NOTIFY_ALLOWED_HOSTS`, `STAGING_APP_URL`, `STAGING_API_URL`.
+- После загрузки репозитория в GitHub добавьте required-check **CI / Build & test** в защите ветки `main` (Settings → Branches).
 
 ## Дополнительно
 
