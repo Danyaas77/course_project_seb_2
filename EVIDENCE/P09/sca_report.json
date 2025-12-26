@@ -1,0 +1,4 @@
+{
+  "note": "Placeholder SCA report; overwritten by Grype scan in .github/workflows/ci-sbom-sca.yml.",
+  "status": "to-be-replaced-by-workflow"
+}
