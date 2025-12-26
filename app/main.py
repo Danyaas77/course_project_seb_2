@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-app = FastAPI(title="SecDev Course App", version="0.2.0")
+app = FastAPI(title="SecDev Course App", version="0.1.0")
 
 
 class ApiError(Exception):
@@ -133,6 +133,9 @@ def health():
     return {"status": "ok"}
 
 
+# Example storage for demo/testing purposes
+
+
 def _initial_state() -> Dict[str, Any]:
     return {
         "items": [],
@@ -168,7 +171,6 @@ def _parse_iso_datetime(value: str) -> datetime:
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"
     return datetime.fromisoformat(value)
-
 
 API_KEY_ENV_VAR = "APP_API_KEY"
 
