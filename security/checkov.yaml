@@ -1,0 +1,6 @@
+soft-fail: true
+quiet: true
+skip-path:
+  - EVIDENCE
+  - tests
+  - .github
