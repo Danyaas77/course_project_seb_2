@@ -1,0 +1,12 @@
+# policy/waivers.yml — шаблон исключений для SCA
+# Каждое исключение должно быть точечным, с обоснованием и сроком пересмотра.
+
+waivers:
+  - id: "CVE-2024-0000"
+    package: "example-lib"
+    version: "0.0.0"
+    severity: "High"
+    reason: "Шаблонная запись для демонстрации формата; замените на реальную уязвимость или удалите при фиксе."
+    issue: "https://github.com/hse-secdev-2025-fall/course-project-Danyaas77/issues/1"
+    expires_at: "2025-12-31"
+    approved_by: "tutor@example.org"

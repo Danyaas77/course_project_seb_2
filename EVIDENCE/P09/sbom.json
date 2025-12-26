@@ -1,0 +1,4 @@
+{
+  "note": "Placeholder SBOM; overwritten by .github/workflows/ci-sbom-sca.yml via anchore/syft.",
+  "status": "to-be-replaced-by-workflow"
+}

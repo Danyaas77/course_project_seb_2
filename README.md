@@ -103,6 +103,25 @@ pre-commit run --all-files
 - Для корректного выполнения заведите Secrets `APP_API_KEY`, `NOTIFY_TOKEN`, `STAGING_DEPLOY_TOKEN` и репозиторные Variables `NOTIFY_WEBHOOK_URL`, `NOTIFY_ALLOWED_HOSTS`, `STAGING_APP_URL`, `STAGING_API_URL`.
 - После загрузки репозитория в GitHub добавьте required-check **CI / Build & test** в защите ветки `main` (Settings → Branches).
 
+## SBOM & SCA (P09)
+
+- Workflow `.github/workflows/ci-sbom-sca.yml` (triggers: `push` по Python/requirements/pyproject/waivers, `workflow_dispatch`) генерирует SBOM (Syft, CycloneDX) и SCA-отчёт (Grype), сохраняет файлы в `EVIDENCE/P09/{sbom.json, sca_report.json, sca_summary.md}` и загружает артефакт `P09_EVIDENCE-${GITHUB_SHA}`.
+- Структура артефактов описана в `EVIDENCE/P09/README.md`; файлы в каталоге — плейсхолдеры под результаты джоба.
+- Локальное воспроизведение (аналог CI):
+
+  ```bash
+  mkdir -p EVIDENCE/P09
+  docker run --rm -v "$PWD":/work -w /work anchore/syft:latest \
+    packages dir:. -o cyclonedx-json > EVIDENCE/P09/sbom.json
+  docker run --rm -v "$PWD":/work -w /work anchore/grype:latest \
+    sbom:/work/EVIDENCE/P09/sbom.json -o json > EVIDENCE/P09/sca_report.json
+  echo "# SCA summary" > EVIDENCE/P09/sca_summary.md
+  jq '[.matches[].vulnerability.severity] | group_by(.) | map({(.[0]): length}) | add' \
+    EVIDENCE/P09/sca_report.json >> EVIDENCE/P09/sca_summary.md || true
+  ```
+
+- Файл `policy/waivers.yml` хранит исключения на уязвимости; перед использованием заполните реальные `id`, `package`, ссылку на Issue/PR и срок пересмотра.
+
 ## Дополнительно
 
 - Безопасность: см. `SECURITY.md`.
