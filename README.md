@@ -24,6 +24,14 @@ pip install ruff black isort pytest pre-commit
 pre-commit install
 ```
 
+### Конфигурация
+
+- `APP_API_KEY` — обязательный API-ключ для всех защищённых запросов.
+- `ATTACHMENTS_DIR` — каталог для безопасного хранения вложений (по умолчанию `./attachments`, создаётся автоматически).
+- `NOTIFY_WEBHOOK_URL` — HTTPS-эндпойнт, куда отправляются уведомления о назначениях.
+- `NOTIFY_ALLOWED_HOSTS` — список доменов через запятую; запросы к другим хостам блокируются.
+- `NOTIFY_TOKEN` — опциональный Bearer-токен для аутентификации при вызове вебхука.
+
 ## Запуск приложения
 
 1. Выставите API-ключ, который понадобится каждому запросу:
@@ -58,6 +66,8 @@ pytest -q
 - `POST /users`, `GET /users` — управление участниками квартиры.
 - `POST /chores`, `GET /chores`, `GET /chores/{id}`, `PUT /chores/{id}`, `DELETE /chores/{id}` — CRUD по задачам с валидацией `cadence`.
 - `POST /assignments`, `GET /assignments?status=pending|completed|skipped`, `PATCH /assignments/{id}` — назначение задач соседям и обновление статусов.
+- `POST /chores/{id}/attachments` — безопасная загрузка изображений (PNG/JPEG, описание работы подтверждено тестами).
+- `POST /assignments/{id}/notify` — отправка уведомлений во внешний вебхук с allowlist хостов и таймаутами.
 - `GET /stats` — агрегированная статистика по пользователям, задачам и назначениям.
 
 Пример создания назначения:
