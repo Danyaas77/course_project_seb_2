@@ -1,0 +1,14 @@
+title = "Course project gitleaks config"
+description = "Default rules with tuning for tests and local fixtures"
+extends = "gitleaks://config/default"
+
+# Allowlist known fake secrets used in tests/fixtures so they don't fail CI.
+[allowlist]
+  description = "Test fixtures and placeholder tokens"
+  paths = [
+    '''tests/.*'''
+  ]
+  regexes = [
+    '''test-secret''',      # deterministic API key fixture value
+    '''notif-secret'''      # dummy notification token in tests
+  ]
