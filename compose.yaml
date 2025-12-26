@@ -1,8 +1,17 @@
 services:
   app:
     build: .
+    image: secdev-course-app:latest
     ports:
       - "8000:8000"
     environment:
-      - PYTHONUNBUFFERED=1
-    profiles: ["dev"]
+      APP_API_KEY: dev-secret-key
+      ATTACHMENTS_DIR: /var/lib/app/attachments
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - attachments:/var/lib/app/attachments
+
+volumes:
+  attachments:
