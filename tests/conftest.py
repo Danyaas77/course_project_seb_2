@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]  # корень репозитори�
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.config import reload_settings  # noqa: E402
 from app.main import API_KEY_ENV_VAR, app, reset_app_state  # noqa: E402
 
 
@@ -19,11 +20,23 @@ def reset_db():
     reset_app_state()
 
 
+@pytest.fixture(autouse=True)
+def attachments_root(tmp_path, monkeypatch):
+    root = tmp_path / "attachments"
+    root.mkdir()
+    monkeypatch.setenv("ATTACHMENTS_DIR", str(root))
+    reload_settings()
+    yield root
+    reload_settings()
+
+
 @pytest.fixture
 def api_key(monkeypatch):
     value = "test-secret"
     monkeypatch.setenv(API_KEY_ENV_VAR, value)
-    return value
+    reload_settings()
+    yield value
+    reload_settings()
 
 
 @pytest.fixture
