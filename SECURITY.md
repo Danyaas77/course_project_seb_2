@@ -24,6 +24,11 @@
 - **Не** добавляйте секреты и API-ключи в репозиторий. Настраивайте переменные окружения (`APP_API_KEY`, строки подключения) локально либо через секреты CI/CD.
 - Используйте только синтетические данные без ПДн и платёжной информации.
 
+## Автоматизированные проверки (SAST & secrets)
+
+- Semgrep (`p/ci` + `security/semgrep/rules.yml`) запускается в `.github/workflows/ci-sast-secrets.yml`; SARIF сохраняется в `EVIDENCE/P10/semgrep.sarif`.
+- Gitleaks (`security/.gitleaks.toml`) сканирует push/PR, отчёт лежит в `EVIDENCE/P10/gitleaks.json`; фиктивные `test-secret` и `notif-secret` из `tests/**` занесены в allowlist.
+
 ## Поддерживаемые версии
 
 - Поддерживается только ветка `main`. Для других веток фикс уязвимостей не гарантируется.

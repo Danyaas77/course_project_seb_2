@@ -1,0 +1,4 @@
+failure-threshold: warning
+ignored:
+  # apt pinning checks are irrelevant because the image does not install system packages
+  - DL3008
