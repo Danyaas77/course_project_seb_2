@@ -1,5 +1,7 @@
 # Roommate Chores Tracker
 
+![CI](https://github.com/hse-secdev-2025-fall/course-project-Danyaas77/actions/workflows/ci.yml/badge.svg)
+
 Трекер домашних дел между участниками квартиры. Доменная модель:
 
 - `User`
