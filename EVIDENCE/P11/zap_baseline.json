@@ -1,0 +1,5 @@
+{
+  "note": "Placeholder; run the Security - DAST (P11, ZAP baseline) workflow to refresh with real scan output.",
+  "target": "http://localhost:8000",
+  "status": "not-run"
+}

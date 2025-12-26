@@ -1,0 +1,46 @@
+rules:
+  - id: fastapi-require-api-key
+    message: >
+      FastAPI endpoints must enforce API key auth with Depends(require_api_key);
+      /health is intentionally public.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-306"
+      owasp: "API3:2019"
+      category: security
+      confidence: high
+    patterns:
+      - pattern: |
+          @app.$METHOD($ROUTE, ...)
+          def $FUNC(...):
+            ...
+      - metavariable-regex:
+          metavariable: METHOD
+          regex: "get|post|put|patch|delete"
+      - pattern-not: |
+          @app.get("/health", ...)
+          def $FUNC(...):
+            ...
+      - pattern-not: |
+          @app.$METHOD(..., dependencies=[Depends(require_api_key)], ...)
+          def $FUNC(...):
+            ...
+      - pattern-not: |
+          @app.$METHOD(...)
+          def $FUNC(..., $AUTH_PARAM=Depends(require_api_key), ...):
+            ...
+
+  - id: httpx-tls-verification-disabled
+    message: "Do not disable TLS verification when sending webhooks or HTTP requests."
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: "CWE-295"
+      owasp: "A02:2021-Cryptographic Failures"
+      category: security
+      confidence: medium
+    pattern-either:
+      - pattern: httpx.$FUNC(..., verify=False, ...)
+      - pattern: httpx.Client(..., verify=False, ...)
+      - pattern: httpx.AsyncClient(..., verify=False, ...)
