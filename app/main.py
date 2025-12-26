@@ -3,15 +3,50 @@ import secrets
 from datetime import datetime, timezone
 from enum import Enum
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
+from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+import httpx
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 app = FastAPI(title="SecDev Course App", version="0.1.0")
+
+API_KEY_ENV_VAR = "APP_API_KEY"
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+UPLOAD_DIR_ENV_VAR = "UPLOAD_DIR"
+MAX_UPLOAD_BYTES = 5_000_000
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+JPEG_SOI = b"\xff\xd8"
+JPEG_EOI = b"\xff\xd9"
+ALLOWED_UPLOAD_TYPES = {"image/png": ".png", "image/jpeg": ".jpg"}
+ASSIGNMENT_WEBHOOK_URL_ENV = "ASSIGNMENT_WEBHOOK_URL"
+ASSIGNMENT_WEBHOOK_ALLOWLIST_ENV = "ASSIGNMENT_WEBHOOK_ALLOWLIST"
+ASSIGNMENT_WEBHOOK_TIMEOUT_ENV = "ASSIGNMENT_WEBHOOK_TIMEOUT_SECONDS"
+ASSIGNMENT_WEBHOOK_RETRIES_ENV = "ASSIGNMENT_WEBHOOK_MAX_RETRIES"
+_WEBHOOK_TRANSPORT_OVERRIDE: httpx.BaseTransport | None = None
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get(CORRELATION_ID_HEADER) or str(uuid4())
+    request.state.correlation_id = correlation_id
+    response = await call_next(request)
+    response.headers[CORRELATION_ID_HEADER] = correlation_id
+    return response
 
 
 class ApiError(Exception):
@@ -44,13 +79,17 @@ def build_problem(
     code: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    correlation_id = getattr(request.state, "correlation_id", str(uuid4()))
+    if type_ == "about:blank" and code:
+        type_ = f"https://example.com/problems/{code.replace('_', '-')}"
     problem: Dict[str, Any] = {
         "type": type_,
         "title": title,
         "status": status,
         "detail": detail,
         "instance": str(request.url.path),
-        "correlation_id": str(uuid4()),
+        "correlation_id": correlation_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if code:
         problem["code"] = code
@@ -59,9 +98,36 @@ def build_problem(
     return problem
 
 
+def problem_response(
+    request: Request,
+    *,
+    status: int,
+    title: str,
+    detail: str,
+    type_: str = "about:blank",
+    code: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> JSONResponse:
+    problem = build_problem(
+        request,
+        status=status,
+        title=title,
+        detail=detail,
+        type_=type_,
+        code=code,
+        extra=extra,
+    )
+    return JSONResponse(
+        status_code=status,
+        content=problem,
+        media_type="application/problem+json",
+        headers={CORRELATION_ID_HEADER: problem["correlation_id"]},
+    )
+
+
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError):
-    problem = build_problem(
+    return problem_response(
         request,
         status=exc.status,
         title=exc.title,
@@ -70,24 +136,23 @@ async def api_error_handler(request: Request, exc: ApiError):
         code=exc.code,
         extra=exc.extra,
     )
-    return JSONResponse(status_code=exc.status, content=problem)
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+    # Mask untrusted details coming from upstream exceptions.
+    detail = "The request could not be processed"
     try:
         title = HTTPStatus(exc.status_code).phrase  # type: ignore[arg-type]
     except ValueError:
         title = "HTTP Error"
-    problem = build_problem(
+    return problem_response(
         request,
         status=exc.status_code,
         title=title,
         detail=detail,
         code="http_error",
     )
-    return JSONResponse(status_code=exc.status_code, content=problem)
 
 
 @app.exception_handler(RequestValidationError)
@@ -102,7 +167,7 @@ async def request_validation_error_handler(
                 "message": err.get("msg", "validation error"),
             }
         )
-    problem = build_problem(
+    return problem_response(
         request,
         status=422,
         title="Unprocessable Entity",
@@ -111,13 +176,12 @@ async def request_validation_error_handler(
         code="validation_error",
         extra={"errors": simplified_errors},
     )
-    return JSONResponse(status_code=422, content=problem)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     # Deliberately hide implementation details from clients.
-    problem = build_problem(
+    return problem_response(
         request,
         status=500,
         title="Internal Server Error",
@@ -125,12 +189,42 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         type_="https://example.com/problems/internal-error",
         code="internal_error",
     )
-    return JSONResponse(status_code=500, content=problem)
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    expected = os.environ.get(API_KEY_ENV_VAR)
+    if not expected:
+        raise ApiError(
+            status=500,
+            title="Internal Server Error",
+            detail="API key not configured",
+            type_="https://example.com/problems/configuration-error",
+            code="config_error",
+        )
+    if not x_api_key or not secrets.compare_digest(x_api_key, expected):
+        raise ApiError(
+            status=401,
+            title="Unauthorized",
+            detail="Invalid API key",
+            type_="https://example.com/problems/invalid-api-key",
+            code="unauthorized",
+        )
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/uploads", status_code=201)
+def upload_attachment(
+    file: UploadFile = File(...),
+    _: None = Depends(require_api_key),
+):
+    """
+    Accepts small image uploads, validates magic bytes, and stores them under a UUID name.
+    """
+    return _save_upload(file)
 
 
 # Example storage for demo/testing purposes
@@ -142,6 +236,7 @@ def _initial_state() -> Dict[str, Any]:
         "users": {},
         "chores": {},
         "assignments": {},
+        "uploads": {},
         "sequence": {
             "user": 1,
             "chore": 1,
@@ -172,27 +267,216 @@ def _parse_iso_datetime(value: str) -> datetime:
         value = value[:-1] + "+00:00"
     return datetime.fromisoformat(value)
 
-API_KEY_ENV_VAR = "APP_API_KEY"
+def _validate_upload_filename(filename: str) -> None:
+    if not filename:
+        raise ApiError(
+            status=400,
+            title="Bad Request",
+            detail="Filename is required",
+            code="upload_bad_name",
+        )
+    if Path(filename).name != filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise ApiError(
+            status=400,
+            title="Bad Request",
+            detail="Invalid filename",
+            code="upload_bad_name",
+        )
 
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    expected = os.environ.get(API_KEY_ENV_VAR)
-    if not expected:
+def _read_upload_bytes(upload: UploadFile) -> bytes:
+    data = bytearray()
+    chunk_size = 1024 * 1024
+    while True:
+        chunk = upload.file.read(chunk_size)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise ApiError(
+                status=413,
+                title="Payload Too Large",
+                detail="Upload exceeds size limit",
+                code="upload_too_large",
+            )
+    return bytes(data)
+
+
+def _sniff_upload_type(payload: bytes) -> Optional[str]:
+    if payload.startswith(PNG_MAGIC):
+        return "image/png"
+    if payload.startswith(JPEG_SOI) and payload.endswith(JPEG_EOI):
+        return "image/jpeg"
+    return None
+
+
+def _resolve_upload_dir() -> Path:
+    base_dir = Path(os.environ.get(UPLOAD_DIR_ENV_VAR, "uploads"))
+    if base_dir.exists() and base_dir.is_symlink():
+        raise ApiError(
+            status=400,
+            title="Bad Request",
+            detail="Upload directory must not be a symlink",
+            code="upload_dir_invalid",
+        )
+    base_dir.mkdir(parents=True, exist_ok=True)
+    resolved = base_dir.resolve()
+    return resolved
+
+
+def _persist_upload(payload: bytes, mime: str) -> Dict[str, Any]:
+    base_dir = _resolve_upload_dir()
+    extension = ALLOWED_UPLOAD_TYPES[mime]
+    upload_id = str(uuid4())
+    filename = f"{upload_id}{extension}"
+    target = (base_dir / filename).resolve()
+    if not str(target).startswith(str(base_dir)):
+        raise ApiError(
+            status=400,
+            title="Bad Request",
+            detail="Upload path is not allowed",
+            code="upload_path_traversal",
+        )
+    if any(parent.is_symlink() for parent in target.parents):
+        raise ApiError(
+            status=400,
+            title="Bad Request",
+            detail="Upload path crosses a symlink",
+            code="upload_path_traversal",
+        )
+    with open(target, "wb") as fh:
+        fh.write(payload)
+    record = {"id": upload_id, "mime": mime, "size": len(payload), "filename": filename}
+    _DB["uploads"][upload_id] = record
+    return record
+
+
+def _save_upload(upload: UploadFile) -> Dict[str, Any]:
+    _validate_upload_filename(upload.filename)
+    payload = _read_upload_bytes(upload)
+    mime = _sniff_upload_type(payload)
+    if not mime or mime not in ALLOWED_UPLOAD_TYPES:
+        raise ApiError(
+            status=415,
+            title="Unsupported Media Type",
+            detail="Only png and jpeg images are supported",
+            code="upload_bad_type",
+            extra={"received_type": upload.content_type},
+        )
+    return _persist_upload(payload, mime)
+
+
+class SafeHttpClient:
+    def __init__(
+        self,
+        *,
+        allow_hosts: Sequence[str],
+        timeout: float = 2.0,
+        max_retries: int = 1,
+        transport: httpx.BaseTransport | None = None,
+    ):
+        if not allow_hosts:
+            raise ValueError("allow_hosts is required")
+        self.allow_hosts = {host.lower() for host in allow_hosts if host}
+        self.timeout = timeout
+        self.max_retries = max(max_retries, 0)
+        self.transport = transport
+
+    def _validated_url(self, raw_url: str) -> tuple[str, str]:
+        parsed = urlparse(raw_url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"}:
+            raise ApiError(
+                status=400,
+                title="Bad Request",
+                detail="Webhook scheme must be http or https",
+                code="webhook_invalid_scheme",
+            )
+        if host not in self.allow_hosts:
+            raise ApiError(
+                status=400,
+                title="Bad Request",
+                detail="Destination host is not allow-listed",
+                code="webhook_host_blocked",
+            )
+        if not host:
+            raise ApiError(
+                status=400,
+                title="Bad Request",
+                detail="Webhook host missing",
+                code="webhook_host_blocked",
+            )
+        return parsed.geturl(), host
+
+    def post_json(self, url: str, payload: Dict[str, Any]) -> None:
+        normalized_url, host = self._validated_url(url)
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                with httpx.Client(timeout=self.timeout, transport=self.transport) as client:
+                    response = client.post(normalized_url, json=payload)
+                response.raise_for_status()
+                return
+            except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    raise ApiError(
+                        status=502,
+                        title="Bad Gateway",
+                        detail="Failed to deliver webhook",
+                        type_="https://example.com/problems/webhook-delivery-failed",
+                        code="webhook_failed",
+                        extra={"host": host, "reason": exc.__class__.__name__},
+                    )
+        if last_exc:
+            raise last_exc
+
+
+def _notify_assignment_completed(assignment: Dict[str, Any]) -> None:
+    webhook_url = os.environ.get(ASSIGNMENT_WEBHOOK_URL_ENV)
+    if not webhook_url:
+        return
+    allow_hosts_env = os.environ.get(ASSIGNMENT_WEBHOOK_ALLOWLIST_ENV, "")
+    allow_hosts = {host.strip().lower() for host in allow_hosts_env.split(",") if host.strip()}
+    parsed = urlparse(webhook_url)
+    if parsed.hostname and not allow_hosts:
+        allow_hosts.add(parsed.hostname.lower())
+    if not allow_hosts:
         raise ApiError(
             status=500,
             title="Internal Server Error",
-            detail="API key not configured",
-            type_="https://example.com/problems/configuration-error",
-            code="config_error",
+            detail="Webhook allowlist is empty",
+            code="webhook_config_invalid",
         )
-    if not x_api_key or not secrets.compare_digest(x_api_key, expected):
+    if parsed.hostname and parsed.hostname.lower() not in allow_hosts:
         raise ApiError(
-            status=401,
-            title="Unauthorized",
-            detail="Invalid API key",
-            type_="https://example.com/problems/invalid-api-key",
-            code="unauthorized",
+            status=400,
+            title="Bad Request",
+            detail="Destination host is not allow-listed",
+            code="webhook_host_blocked",
         )
+    timeout_seconds = float(os.environ.get(ASSIGNMENT_WEBHOOK_TIMEOUT_ENV, "2.0"))
+    max_retries = int(os.environ.get(ASSIGNMENT_WEBHOOK_RETRIES_ENV, "1"))
+    client = SafeHttpClient(
+        allow_hosts=allow_hosts,
+        timeout=timeout_seconds,
+        max_retries=max_retries,
+        transport=_WEBHOOK_TRANSPORT_OVERRIDE,
+    )
+    status_value = (
+        assignment["status"].value
+        if isinstance(assignment["status"], AssignmentStatus)
+        else assignment["status"]
+    )
+    client.post_json(
+        webhook_url,
+        {
+            "assignment_id": assignment["id"],
+            "user_id": assignment["user_id"],
+            "chore_id": assignment["chore_id"],
+            "status": status_value,
+        },
+    )
 
 
 class ItemCreate(BaseModel):
@@ -517,11 +801,18 @@ def update_assignment(
     _: None = Depends(require_api_key),
 ):
     assignment = _get_assignment_or_404(assignment_id).copy()
+    previous_status = assignment["status"]
     update_data = payload.model_dump(exclude_unset=True)
     if "status" in update_data and update_data["status"] is not None:
         assignment["status"] = update_data["status"]
     if "due_at" in update_data and update_data["due_at"] is not None:
         assignment["due_at"] = update_data["due_at"]
+    should_notify = (
+        assignment["status"] == AssignmentStatus.completed
+        and previous_status != AssignmentStatus.completed
+    )
+    if should_notify:
+        _notify_assignment_completed(assignment)
     _DB["assignments"][assignment_id] = assignment
     return assignment
 
